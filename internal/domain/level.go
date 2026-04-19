@@ -72,3 +72,18 @@ func NewLevel(
 		Sectors:  append([]Sector(nil), sectors...),
 	}, nil
 }
+
+func (l Level) PlayerStart() (x int, y int, ok bool) {
+	for _, thing := range l.Things {
+		if thing.Type >= 1 && thing.Type <= 4 {
+			return int(thing.X), int(thing.Y), true
+		}
+	}
+
+	if len(l.Things) == 0 {
+		return 0, 0, false
+	}
+
+	first := l.Things[0]
+	return int(first.X), int(first.Y), true
+}
