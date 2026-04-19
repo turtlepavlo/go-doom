@@ -17,6 +17,10 @@ Layered Doom engine rewrite in Go with strict separation:
 1. `rungame.UseCase` orchestrates tick/input/simulation/render flow.
 2. `InputConverter` maps raw input DTO into domain commands.
 3. `DomainSimulation` + `HeadlessRenderer` provide infrastructure adapters.
+- Map pipeline:
+1. `loadmap.UseCase` orchestrates map extraction and conversion.
+2. `MapReader` extracts raw `THINGS/LINEDEFS/SIDEDEFS/VERTEXES/SECTORS`.
+3. `MapConverter` maps binary lumps to domain `Level` model.
 
 Run:
 
@@ -28,4 +32,10 @@ Run headless runtime demo for 10 ticks:
 
 ```bash
 go run ./cmd/doom -iwad /path/to/doom1.wad -runtime-ticks 10
+```
+
+Parse one map from a WAD:
+
+```bash
+go run ./cmd/doom -iwad /path/to/doom1.wad -map E1M1
 ```

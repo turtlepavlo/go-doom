@@ -9,4 +9,5 @@ var (
 	ErrNegativeCount      = errors.New("negative lump count")
 	ErrEmptyLumpName      = errors.New("empty lump name")
 	ErrLumpCountMismatch  = errors.New("lump count mismatch")
+	ErrEmptyMapName       = errors.New("empty map name")
 )
