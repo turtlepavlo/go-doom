@@ -29,8 +29,14 @@ type Engine struct {
 }
 
 func NewEngine() *Engine {
+	return NewEngineAt(0, 0)
+}
+
+func NewEngineAt(playerX int, playerY int) *Engine {
 	return &Engine{
 		state: GameState{
+			PlayerX: playerX,
+			PlayerY: playerY,
 			Running: true,
 		},
 	}
@@ -41,16 +47,18 @@ func (e *Engine) Step(commands []Command) Frame {
 		return e.snapshot()
 	}
 
+	const moveStep = 16
+
 	for _, command := range commands {
 		switch command {
 		case CommandMoveForward:
-			e.state.PlayerY--
+			e.state.PlayerY -= moveStep
 		case CommandMoveBackward:
-			e.state.PlayerY++
+			e.state.PlayerY += moveStep
 		case CommandStrafeLeft:
-			e.state.PlayerX--
+			e.state.PlayerX -= moveStep
 		case CommandStrafeRight:
-			e.state.PlayerX++
+			e.state.PlayerX += moveStep
 		case CommandQuit:
 			e.state.Running = false
 		}
@@ -62,6 +70,10 @@ func (e *Engine) Step(commands []Command) Frame {
 
 func (e *Engine) State() GameState {
 	return e.state
+}
+
+func (e *Engine) Frame() Frame {
+	return e.snapshot()
 }
 
 func (e *Engine) snapshot() Frame {

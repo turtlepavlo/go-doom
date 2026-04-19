@@ -21,3 +21,21 @@ func TestNewLevelEmptyName(t *testing.T) {
 		t.Fatalf("expected ErrEmptyMapName, got %v", err)
 	}
 }
+
+func TestPlayerStart(t *testing.T) {
+	level, err := NewLevel("E1M1", []Thing{
+		{X: 40, Y: 10, Type: 3004},
+		{X: 128, Y: -64, Type: 1},
+	}, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("new level: %v", err)
+	}
+
+	x, y, ok := level.PlayerStart()
+	if !ok {
+		t.Fatal("expected player start")
+	}
+	if x != 128 || y != -64 {
+		t.Fatalf("expected player start at (128,-64), got (%d,%d)", x, y)
+	}
+}

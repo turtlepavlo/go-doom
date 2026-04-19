@@ -21,6 +21,10 @@ Layered Doom engine rewrite in Go with strict separation:
 1. `loadmap.UseCase` orchestrates map extraction and conversion.
 2. `MapReader` extracts raw `THINGS/LINEDEFS/SIDEDEFS/VERTEXES/SECTORS`.
 3. `MapConverter` maps binary lumps to domain `Level` model.
+- Playable window pipeline:
+1. `playmap.UseCase` applies input -> commands -> simulation each frame.
+2. `EbitenPoller` collects keyboard state.
+3. `TopDownRenderer` renders map geometry and player marker in a window.
 
 Run:
 
@@ -39,3 +43,14 @@ Parse one map from a WAD:
 ```bash
 go run ./cmd/doom -iwad /path/to/doom1.wad -map E1M1
 ```
+
+Run playable map window:
+
+```bash
+go run ./cmd/doom -iwad /path/to/freedoom1.wad -map E1M1 -play
+```
+
+Controls:
+
+- `WASD` or Arrow keys: move
+- `Q` or `Esc`: quit
