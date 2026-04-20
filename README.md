@@ -24,7 +24,8 @@ Layered Doom engine rewrite in Go with strict separation:
 - Playable window pipeline:
 1. `playmap.UseCase` applies input -> commands -> simulation each frame.
 2. `EbitenPoller` collects keyboard state.
-3. `TopDownRenderer` renders map geometry and player marker in a window.
+3. `FirstPersonRenderer` renders walls in first-person perspective.
+4. `TopDownRenderer` remains available via `-topdown` for debug.
 
 Run:
 
@@ -52,5 +53,7 @@ go run ./cmd/doom -iwad /path/to/freedoom1.wad -map E1M1 -play
 
 Controls:
 
-- `WASD` or Arrow keys: move
-- `Q` or `Esc`: quit
+- `W/S` or `ArrowUp/ArrowDown`: move forward/back
+- `A/D` or `ArrowLeft/ArrowRight`: turn left/right
+- `Q/E`: strafe left/right
+- `Esc`: quit

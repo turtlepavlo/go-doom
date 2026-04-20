@@ -32,15 +32,17 @@ func main() {
 	var windowWidth int
 	var windowHeight int
 	var zoom float64
+	var topDownDebug bool
 
 	flag.StringVar(&iwadPath, "iwad", "", "path to IWAD/PWAD file")
 	flag.IntVar(&runtimeTicks, "runtime-ticks", 0, "run headless runtime loop for N ticks after loading WAD")
 	flag.IntVar(&tickRate, "tick-rate", 35, "runtime loop tick rate")
 	flag.StringVar(&mapName, "map", "", "parse selected map marker (for example E1M1 or MAP01)")
-	flag.BoolVar(&playMode, "play", false, "run playable top-down map view")
+	flag.BoolVar(&playMode, "play", false, "run playable first-person mode")
 	flag.IntVar(&windowWidth, "width", 1280, "window width in play mode")
 	flag.IntVar(&windowHeight, "height", 720, "window height in play mode")
 	flag.Float64Var(&zoom, "zoom", 1.0, "zoom multiplier in play mode")
+	flag.BoolVar(&topDownDebug, "topdown", false, "use top-down debug renderer in play mode")
 	flag.Parse()
 
 	iwadPath = strings.TrimSpace(iwadPath)
@@ -109,7 +111,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "play mode requires a valid map")
 			os.Exit(1)
 		}
-		if err := runPlayable(parsedLevel, tickRate, windowWidth, windowHeight, zoom); err != nil {
+		if err := runPlayable(parsedLevel, tickRate, windowWidth, windowHeight, zoom, topDownDebug); err != nil {
 			fmt.Fprintf(os.Stderr, "run playable mode: %v\n", err)
 			os.Exit(1)
 		}
@@ -171,7 +173,7 @@ func runLoadMap(ctx context.Context, wadPath string, mapName string) (domain.Lev
 	return level, nil
 }
 
-func runPlayable(level domain.Level, tickRate int, width int, height int, zoom float64) error {
+func runPlayable(level domain.Level, tickRate int, width int, height int, zoom float64, topDownDebug bool) error {
 	startX, startY, ok := level.PlayerStart()
 	if !ok {
 		startX = 0
@@ -193,11 +195,16 @@ func runPlayable(level domain.Level, tickRate int, width int, height int, zoom f
 	}
 
 	inputPoller := inputinfra.NewEbitenPoller()
-	renderer := renderinfra.NewTopDownRenderer(level, width, height, zoom)
+	var renderer ebitenplay.FrameRenderer
+	if topDownDebug {
+		renderer = renderinfra.NewTopDownRenderer(level, width, height, zoom)
+	} else {
+		renderer = renderinfra.NewFirstPersonRenderer(level, width, height, zoom)
+	}
 	game := ebitenplay.New(controller, inputPoller, renderer, engine.Frame())
 
 	ebiten.SetWindowSize(width, height)
-	ebiten.SetWindowTitle(fmt.Sprintf("go-doom | %s | WASD/Arrows move, Q/Esc quit", level.Name))
+	ebiten.SetWindowTitle(fmt.Sprintf("go-doom | %s | W/S move, A/D turn, Q/E strafe, Esc quit", level.Name))
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetTPS(tickRate)
 

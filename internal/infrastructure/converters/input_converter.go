@@ -28,10 +28,14 @@ func (c *InputConverter) ToCommands(raw []dto.RawInput) []domain.Command {
 		case "S", "DOWN", "ARROWDOWN":
 			commands = append(commands, domain.CommandMoveBackward)
 		case "A", "LEFT", "ARROWLEFT":
-			commands = append(commands, domain.CommandStrafeLeft)
+			commands = append(commands, domain.CommandTurnLeft)
 		case "D", "RIGHT", "ARROWRIGHT":
+			commands = append(commands, domain.CommandTurnRight)
+		case "Q":
+			commands = append(commands, domain.CommandStrafeLeft)
+		case "E":
 			commands = append(commands, domain.CommandStrafeRight)
-		case "ESC", "ESCAPE", "Q":
+		case "ESC", "ESCAPE":
 			commands = append(commands, domain.CommandQuit)
 		}
 	}
