@@ -3,17 +3,16 @@ package domain
 import "testing"
 
 func TestEngineStep_AppliesCommands(t *testing.T) {
-	engine := NewEngine()
+	engine := NewEngineAt(0, 0)
 	frame := engine.Step([]Command{
 		CommandMoveForward,
-		CommandStrafeRight,
 	})
 
 	if frame.Tick != 1 {
 		t.Fatalf("expected tick=1, got %d", frame.Tick)
 	}
-	if frame.PlayerX != 16 || frame.PlayerY != -16 {
-		t.Fatalf("expected player position (16,-16), got (%d,%d)", frame.PlayerX, frame.PlayerY)
+	if frame.PlayerX != 14 || frame.PlayerY != 0 {
+		t.Fatalf("expected player position (14,0), got (%d,%d)", frame.PlayerX, frame.PlayerY)
 	}
 	if !frame.Running {
 		t.Fatal("expected running=true")
@@ -42,5 +41,14 @@ func TestFrame(t *testing.T) {
 	frame := engine.Frame()
 	if frame.PlayerX != 32 || frame.PlayerY != 16 || !frame.Running {
 		t.Fatalf("unexpected frame snapshot: %+v", frame)
+	}
+}
+
+func TestEngineStep_TurnChangesAngle(t *testing.T) {
+	engine := NewEngine()
+	before := engine.Frame().Angle
+	after := engine.Step([]Command{CommandTurnRight}).Angle
+	if after <= before {
+		t.Fatalf("expected angle to increase, before=%f after=%f", before, after)
 	}
 }

@@ -12,21 +12,25 @@ func TestInputConverter_ToCommands(t *testing.T) {
 	raw := []dto.RawInput{
 		{Code: "w", Pressed: true},
 		{Code: "ARROWRIGHT", Pressed: true},
+		{Code: "q", Pressed: true},
 		{Code: "esc", Pressed: true},
 		{Code: "left", Pressed: false},
 	}
 
 	commands := converter.ToCommands(raw)
-	if len(commands) != 3 {
-		t.Fatalf("expected 3 commands, got %d", len(commands))
+	if len(commands) != 4 {
+		t.Fatalf("expected 4 commands, got %d", len(commands))
 	}
 	if commands[0] != domain.CommandMoveForward {
 		t.Fatalf("expected move forward, got %s", commands[0])
 	}
-	if commands[1] != domain.CommandStrafeRight {
-		t.Fatalf("expected strafe right, got %s", commands[1])
+	if commands[1] != domain.CommandTurnRight {
+		t.Fatalf("expected turn right, got %s", commands[1])
 	}
-	if commands[2] != domain.CommandQuit {
-		t.Fatalf("expected quit, got %s", commands[2])
+	if commands[2] != domain.CommandStrafeLeft {
+		t.Fatalf("expected strafe left, got %s", commands[2])
+	}
+	if commands[3] != domain.CommandQuit {
+		t.Fatalf("expected quit, got %s", commands[3])
 	}
 }
