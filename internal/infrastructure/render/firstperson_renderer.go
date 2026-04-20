@@ -52,6 +52,7 @@ type projectedWall struct {
 	material string
 	light    float64
 	depth    float64
+	facing   float64
 }
 
 type projectedEnemy struct {
@@ -67,6 +68,7 @@ type projectedEnemy struct {
 	kind      string
 	hurtTicks int
 	health    int
+	phase     float64
 }
 
 type FirstPersonRenderer struct {
@@ -147,9 +149,11 @@ func (r *FirstPersonRenderer) Draw(screen *ebiten.Image, frame domain.Frame) {
 		return 0
 	})
 	for _, enemy := range enemies {
+		r.drawEnemyShadow(enemy, depthBuffer)
 		r.drawProjectedEnemy(enemy, depthBuffer)
 	}
 
+	r.drawAtmospherePass(frame)
 	r.drawCrosshair()
 	r.drawWeapon(frame)
 	r.drawStatusBar(frame)
@@ -157,6 +161,7 @@ func (r *FirstPersonRenderer) Draw(screen *ebiten.Image, frame domain.Frame) {
 		intensity := clamp(float64(frame.DamageFlashTicks)/6, 0.08, 0.45)
 		overlayTint(r.backbuffer, 0, 0, internalRenderWidth, r.viewportH, color.RGBA{R: 164, G: 24, B: 24, A: 255}, intensity)
 	}
+	r.applyVignetteAndGrain(frame.Tick)
 
 	screen.Fill(color.RGBA{R: 0, G: 0, B: 0, A: 255})
 	opts := &ebiten.DrawImageOptions{}
@@ -184,27 +189,30 @@ func (r *FirstPersonRenderer) drawBackground(frame domain.Frame) {
 	sinA := math.Sin(frame.Angle)
 	playerX := float64(frame.PlayerX)
 	playerY := float64(frame.PlayerY)
+	horizonY := centerY - 5 + math.Sin(float64(frame.Tick)*0.015)*1.4
 
 	for y := 0; y < r.viewportH; y++ {
-		row := float64(y) - centerY
+		row := float64(y) - horizonY
 		for x := 0; x < internalRenderWidth; x++ {
-			if math.Abs(row) < 0.75 {
-				r.backbuffer.Set(x, y, color.RGBA{R: 38, G: 44, B: 58, A: 255})
+			if row < -0.5 {
+				r.backbuffer.Set(x, y, sampleSkyTexel(float64(x), float64(y), frame.Angle, frame.Tick))
+				continue
+			}
+			if row < 0.6 {
+				r.backbuffer.Set(x, y, color.RGBA{R: 60, G: 64, B: 74, A: 255})
 				continue
 			}
 
-			dist := (playerEyeHeight * r.focal) / math.Abs(row)
-			dist = clamp(dist, 8, 2800)
+			dist := (playerEyeHeight * r.focal) / row
+			dist = clamp(dist, 8, 3200)
 			cameraX := (float64(x) - centerX) / r.focal
 
 			worldX := playerX + dist*(cosA-sinA*cameraX)
 			worldY := playerY + dist*(sinA+cosA*cameraX)
 
-			if row > 0 {
-				r.backbuffer.Set(x, y, sampleFloorTexel(worldX, worldY, dist))
-			} else {
-				r.backbuffer.Set(x, y, sampleCeilingTexel(worldX, worldY, dist))
-			}
+			floorCol := sampleFloorTexel(worldX, worldY, dist, frame.Tick)
+			fogAmt := smoothstep(780, 2600, dist)
+			r.backbuffer.Set(x, y, mixColor(floorCol, color.RGBA{R: 82, G: 90, B: 106, A: 255}, 0.58*fogAmt))
 		}
 	}
 }
@@ -257,6 +265,10 @@ func (r *FirstPersonRenderer) projectWalls(frame domain.Frame) []projectedWall {
 		if wallLen < 0.0001 {
 			continue
 		}
+		normalX := -(wall.by - wall.ay) / wallLen
+		normalY := (wall.bx - wall.ax) / wallLen
+		facing := math.Abs(normalX*cosA + normalY*sinA)
+
 		u1 := math.Hypot(worldAX-wall.ax, worldAY-wall.ay) / 64
 		u2 := math.Hypot(worldBX-wall.ax, worldBY-wall.ay) / 64
 
@@ -278,6 +290,7 @@ func (r *FirstPersonRenderer) projectWalls(frame domain.Frame) []projectedWall {
 			material: wall.material,
 			light:    wall.lightLevel,
 			depth:    (az + bz) / 2,
+			facing:   facing,
 		})
 	}
 
@@ -342,11 +355,15 @@ func (r *FirstPersonRenderer) drawProjectedWall(wall projectedWall, depthBuffer 
 
 		u := lerp(u1, u2, t)
 		heightInv := 1.0 / float64(intMax(1, botInt-topInt+1))
-		brightness := clamp((1-(depth/1750))*wall.light, 0.15, 1.15)
+		depthLighting := clamp(1-(depth/1850), 0.12, 1.08)
+		sideLighting := 0.72 + wall.facing*0.36
+		brightness := clamp(depthLighting*wall.light*sideLighting, 0.12, 1.25)
+		fogAmt := smoothstep(760, 2450, depth)
 
 		for y := topInt; y <= botInt; y++ {
 			v := float64(y-topInt) * heightInv
 			col := sampleWallTexel(wall.material, seed, baseR, baseG, baseB, u, v, brightness, x, y)
+			col = mixColor(col, color.RGBA{R: 78, G: 84, B: 96, A: 255}, 0.62*fogAmt)
 			r.backbuffer.Set(x, y, col)
 		}
 
@@ -406,6 +423,7 @@ func (r *FirstPersonRenderer) projectEnemies(frame domain.Frame) []projectedEnem
 			kind:      enemy.Kind,
 			health:    enemy.Health,
 			hurtTicks: enemy.HurtTicks,
+			phase:     float64(frame.Tick)*0.18 + (float64(enemy.X)+float64(enemy.Y))*0.008,
 		})
 	}
 
@@ -433,16 +451,85 @@ func (r *FirstPersonRenderer) drawProjectedEnemy(enemy projectedEnemy, depthBuff
 		columnPainted := false
 		for y := top; y <= bottom; y++ {
 			v := float64(y-enemy.top) / heightDenom
-			col, ok := sampleEnemyTexel(enemy.kind, enemy.health, enemy.hurtTicks, u, v)
+			col, alpha, ok := sampleEnemyTexel(enemy.kind, enemy.health, enemy.hurtTicks, u, v, enemy.phase, enemy.depth)
 			if !ok {
 				continue
 			}
-			r.backbuffer.Set(x, y, col)
+			blendPixel(r.backbuffer, x, y, col, alpha)
 			columnPainted = true
 		}
 
 		if columnPainted {
 			depthBuffer[x] = enemy.depth
+		}
+	}
+}
+
+func (r *FirstPersonRenderer) drawEnemyShadow(enemy projectedEnemy, depthBuffer []float64) {
+	shadowW := int(float64(enemy.width) * 0.64)
+	shadowH := int(float64(enemy.height) * 0.12)
+	if shadowW < 4 || shadowH < 2 {
+		return
+	}
+
+	cx := (enemy.left + enemy.right) / 2
+	baseY := intMin(r.viewportH-1, enemy.bottom+2)
+	left := intMax(0, cx-shadowW/2)
+	right := intMin(internalRenderWidth-1, cx+shadowW/2)
+	top := intMax(0, baseY-shadowH/2)
+	bottom := intMin(r.viewportH-1, baseY+shadowH/2)
+	if right < left || bottom < top {
+		return
+	}
+
+	for x := left; x <= right; x++ {
+		if enemy.depth > depthBuffer[x]+120 {
+			continue
+		}
+		nx := (float64(x-cx) / float64(intMax(1, shadowW/2)))
+		for y := top; y <= bottom; y++ {
+			ny := (float64(y-baseY) / float64(intMax(1, shadowH/2)))
+			d := nx*nx + ny*ny
+			if d > 1 {
+				continue
+			}
+			alpha := (1 - d) * 0.32
+			blendPixel(r.backbuffer, x, y, color.RGBA{R: 10, G: 8, B: 8, A: 255}, alpha)
+		}
+	}
+}
+
+func (r *FirstPersonRenderer) drawAtmospherePass(frame domain.Frame) {
+	t := 0.42 + 0.1*math.Sin(float64(frame.Tick)*0.02)
+	overlayTint(r.backbuffer, 0, 0, internalRenderWidth, r.viewportH/2, color.RGBA{R: 36, G: 54, B: 84, A: 255}, 0.08*t)
+	overlayTint(r.backbuffer, 0, r.viewportH/2, internalRenderWidth, r.viewportH/2, color.RGBA{R: 84, G: 68, B: 52, A: 255}, 0.05)
+}
+
+func (r *FirstPersonRenderer) applyVignetteAndGrain(tick uint64) {
+	cx := float64(internalRenderWidth) / 2
+	cy := float64(r.viewportH) / 2
+	maxDist := math.Hypot(cx, cy)
+
+	for y := 0; y < r.viewportH; y++ {
+		for x := 0; x < internalRenderWidth; x++ {
+			dx := float64(x) - cx
+			dy := float64(y) - cy
+			dist := math.Hypot(dx, dy) / maxDist
+			vignette := clamp((dist-0.58)/0.42, 0, 1)
+
+			rv, gv, bv, _ := r.backbuffer.At(x, y).RGBA()
+			red := float64(rv >> 8)
+			green := float64(gv >> 8)
+			blue := float64(bv >> 8)
+
+			grain := (valueNoise2D(x+int(tick)%512, y+int(tick*3)%512, uint32(913+tick*17)) - 0.5) * 10
+			darkness := 1 - vignette*0.4
+
+			red = clamp((red+grain)*darkness, 0, 255)
+			green = clamp((green+grain)*darkness, 0, 255)
+			blue = clamp((blue+grain)*darkness, 0, 255)
+
+			r.backbuffer.Set(x, y, color.RGBA{R: uint8(red), G: uint8(green), B: uint8(blue), A: 255})
 		}
 	}
 }
@@ -458,29 +545,51 @@ func (r *FirstPersonRenderer) drawCrosshair() {
 }
 
 func (r *FirstPersonRenderer) drawWeapon(frame domain.Frame) {
-	bob := math.Sin(float64(frame.Tick)*0.22) * 2
-	baseY := r.viewportH - 10 + int(math.Round(bob))
-	centerX := internalRenderWidth / 2
+	bobX := math.Sin(float64(frame.Tick)*0.18) * 2
+	bobY := math.Sin(float64(frame.Tick)*0.24) * 2
+	recoil := 0.0
+	if frame.WeaponFlashTicks > 0 {
+		recoil = float64(4 - frame.WeaponFlashTicks)
+	}
+	centerX := (internalRenderWidth / 2) + int(math.Round(bobX))
+	baseY := r.viewportH - 8 + int(math.Round(bobY+recoil))
 
-	metal := color.RGBA{R: 118, G: 112, B: 108, A: 255}
-	darkMetal := color.RGBA{R: 82, G: 76, B: 72, A: 255}
-	grip := color.RGBA{R: 60, G: 46, B: 38, A: 255}
+	// Hands
+	drawEllipseFilled(r.backbuffer, centerX-28, baseY-4, 16, 10, color.RGBA{R: 148, G: 108, B: 82, A: 255})
+	drawEllipseFilled(r.backbuffer, centerX+28, baseY-4, 16, 10, color.RGBA{R: 146, G: 106, B: 80, A: 255})
+	drawEllipseFilled(r.backbuffer, centerX-28, baseY-1, 13, 7, color.RGBA{R: 122, G: 86, B: 64, A: 255})
+	drawEllipseFilled(r.backbuffer, centerX+28, baseY-1, 13, 7, color.RGBA{R: 122, G: 86, B: 64, A: 255})
 
-	fillRect(r.backbuffer, centerX-26, baseY-10, 52, 9, darkMetal)
-	fillRect(r.backbuffer, centerX-18, baseY-18, 36, 8, metal)
-	fillRect(r.backbuffer, centerX-10, baseY-28, 20, 10, metal)
-	fillRect(r.backbuffer, centerX-6, baseY-8, 12, 16, grip)
+	// Receiver
+	fillRectGradient(r.backbuffer, centerX-36, baseY-18, 72, 16, color.RGBA{R: 78, G: 74, B: 78, A: 255}, color.RGBA{R: 46, G: 44, B: 50, A: 255})
+	fillRect(r.backbuffer, centerX-26, baseY-12, 52, 4, color.RGBA{R: 98, G: 98, B: 104, A: 255})
+
+	// Barrel and pump
+	fillRectGradient(r.backbuffer, centerX-16, baseY-34, 32, 18, color.RGBA{R: 116, G: 120, B: 126, A: 255}, color.RGBA{R: 70, G: 74, B: 82, A: 255})
+	fillRectGradient(r.backbuffer, centerX-10, baseY-46, 20, 12, color.RGBA{R: 136, G: 138, B: 144, A: 255}, color.RGBA{R: 78, G: 82, B: 90, A: 255})
+	fillRect(r.backbuffer, centerX-8, baseY-41, 16, 1, color.RGBA{R: 188, G: 190, B: 198, A: 255})
+
+	// Grip
+	fillRectGradient(r.backbuffer, centerX-9, baseY-8, 18, 20, color.RGBA{R: 72, G: 54, B: 40, A: 255}, color.RGBA{R: 44, G: 30, B: 22, A: 255})
 
 	if frame.WeaponFlashTicks > 0 {
 		flashStrength := clamp(float64(frame.WeaponFlashTicks)/3, 0.2, 1)
+		drawEllipseFilled(
+			r.backbuffer,
+			centerX,
+			baseY-48,
+			int(18+flashStrength*10),
+			int(7+flashStrength*4),
+			color.RGBA{R: 255, G: 218, B: 132, A: 255},
+		)
 		overlayTint(
 			r.backbuffer,
-			centerX-24,
-			baseY-36,
-			48,
-			20,
-			color.RGBA{R: 255, G: 214, B: 130, A: 255},
-			0.5*flashStrength,
+			centerX-36,
+			baseY-62,
+			72,
+			42,
+			color.RGBA{R: 255, G: 214, B: 120, A: 255},
+			0.38*flashStrength,
 		)
 	}
 }
@@ -677,44 +786,50 @@ func materialColor(seed uint32) (r float64, g float64, b float64) {
 }
 
 func sampleWallTexel(material string, seed uint32, baseR float64, baseG float64, baseB float64, u float64, v float64, brightness float64, x int, y int) color.RGBA {
-	ux := int(math.Floor(fract(u) * 64))
-	vy := int(math.Floor(fract(v) * 128))
-	pattern := 1.0
+	uFrac := fract(u)
+	vFrac := fract(v)
+	ux := uFrac * 64
+	vy := vFrac * 128
+	materialClass := wallMaterialClass(material)
 
-	switch wallMaterialClass(material) {
+	height := wallHeightSample(materialClass, ux, vy, seed)
+	hx := wallHeightSample(materialClass, ux+1, vy, seed) - height
+	hy := wallHeightSample(materialClass, ux, vy+1, seed) - height
+	normalX, normalY, normalZ := normalizeVec3(-hx*1.8, -hy*1.8, 1)
+	lightX, lightY, lightZ := normalizeVec3(-0.32, -0.18, 0.93)
+	diffuse := clamp(normalX*lightX+normalY*lightY+normalZ*lightZ, 0.24, 1.25)
+
+	pattern := 1.0
+	switch materialClass {
 	case "brick":
-		if vy%12 == 0 {
-			pattern *= 0.62
-		}
-		offset := 0
-		if ((vy / 12) % 2) == 1 {
+		mortarH := smoothPulse(vFrac, 0.09, 0.106, 0.16, 0.18)
+		offset := 0.0
+		if int(vy/12)%2 == 1 {
 			offset = 8
 		}
-		if (ux+offset)%16 == 0 {
-			pattern *= 0.58
-		}
+		mortarV := smoothPulse(fract((ux+offset)/16), 0.01, 0.03, 0.97, 0.99)
+		pattern *= 0.75 + 0.25*(1-math.Max(mortarH, mortarV))
 	case "metal":
-		if ux%16 == 0 || vy%16 == 0 {
-			pattern *= 0.72
-		}
-		if (ux%16 == 3 || ux%16 == 12) && (vy%16 == 3 || vy%16 == 12) {
-			pattern *= 1.22
-		}
+		panelH := smoothPulse(fract(ux/16), 0.0, 0.05, 0.95, 1.0)
+		panelV := smoothPulse(fract(vy/16), 0.0, 0.05, 0.95, 1.0)
+		pattern *= 0.78 + 0.22*(1-math.Max(panelH, panelV))
 	case "wood":
-		wave := math.Sin(float64(ux)*0.35 + float64(vy)*0.07)
-		pattern *= 0.82 + 0.2*wave
+		grain := math.Sin(ux*0.22+vy*0.035) + 0.5*math.Sin(ux*0.57+vy*0.02)
+		pattern *= 0.85 + 0.15*grain
 	default:
-		if ux%32 == 0 || vy%20 == 0 {
-			pattern *= 0.8
-		}
+		crack := smoothPulse(fract(ux/31), 0.0, 0.03, 0.97, 1.0)
+		pattern *= 0.8 + 0.2*(1-crack)
 	}
 
-	noise := 0.86 + 0.22*valueNoise2D(ux+x*3, vy+y*2, seed)
-	shading := pattern * noise * brightness
+	microNoise := 0.84 + 0.28*valueNoise2D(int(ux)+x*5, int(vy)+y*3, seed)
+	edgeOcclusion := clamp(math.Min(math.Min(uFrac, 1-uFrac), math.Min(vFrac, 1-vFrac))*7.5, 0.62, 1)
+	spec := math.Pow(clamp(diffuse, 0, 1), 14) * 0.12
+	shading := pattern * microNoise * brightness * diffuse * edgeOcclusion
+
 	return color.RGBA{
-		R: uint8(clamp(baseR*shading, 0, 255)),
-		G: uint8(clamp(baseG*shading, 0, 255)),
-		B: uint8(clamp(baseB*shading, 0, 255)),
+		R: uint8(clamp(baseR*(shading+spec), 0, 255)),
+		G: uint8(clamp(baseG*(shading+spec*0.95), 0, 255)),
+		B: uint8(clamp(baseB*(shading+spec*0.9), 0, 255)),
 		A: 255,
 	}
 }
@@ -733,89 +848,111 @@ func wallMaterialClass(material string) string {
 	}
 }
 
-func sampleFloorTexel(worldX float64, worldY float64, dist float64) color.RGBA {
+func sampleFloorTexel(worldX float64, worldY float64, dist float64, tick uint64) color.RGBA {
 	tile := 64.0
 	tx := int(math.Floor(worldX / tile))
 	ty := int(math.Floor(worldY / tile))
 	localX := fract(worldX / tile)
 	localY := fract(worldY / tile)
 
-	noise := valueNoise2D(tx*17+int(localX*23), ty*19+int(localY*31), 91231)
-	base := color.RGBA{R: 62, G: 46, B: 36, A: 255}
+	noise := valueNoise2D(tx*19+int(localX*29), ty*23+int(localY*31), 91231)
+	grime := valueNoise2D(tx*11+int(localX*61), ty*13+int(localY*67), 5123+uint32(tick))
+	base := color.RGBA{R: 68, G: 52, B: 40, A: 255}
 	if (tx+ty)&1 == 0 {
-		base = color.RGBA{R: 70, G: 54, B: 42, A: 255}
+		base = color.RGBA{R: 76, G: 58, B: 44, A: 255}
 	}
-	if localX < 0.03 || localY < 0.03 {
-		base = color.RGBA{R: 38, G: 26, B: 20, A: 255}
+	grout := math.Max(
+		smoothPulse(localX, 0.0, 0.028, 0.972, 1.0),
+		smoothPulse(localY, 0.0, 0.028, 0.972, 1.0),
+	)
+	if grout > 0.2 {
+		base = color.RGBA{R: 40, G: 30, B: 24, A: 255}
 	}
-
-	fog := clamp(1-(dist/2100), 0.2, 1)
-	mod := (0.88 + 0.2*noise) * fog
+	wetness := clamp((grime-0.75)*4, 0, 1)
+	highlight := 0.06 + wetness*0.22
+	fog := clamp(1-(dist/2350), 0.18, 1)
+	mod := (0.82 + 0.24*noise) * fog
 	return color.RGBA{
-		R: uint8(clamp(float64(base.R)*mod, 0, 255)),
-		G: uint8(clamp(float64(base.G)*mod, 0, 255)),
-		B: uint8(clamp(float64(base.B)*mod, 0, 255)),
+		R: uint8(clamp(float64(base.R)*(mod+highlight), 0, 255)),
+		G: uint8(clamp(float64(base.G)*(mod+highlight*0.8), 0, 255)),
+		B: uint8(clamp(float64(base.B)*(mod+highlight*0.55), 0, 255)),
 		A: 255,
 	}
 }
 
-func sampleCeilingTexel(worldX float64, worldY float64, dist float64) color.RGBA {
-	tile := 96.0
-	tx := int(math.Floor(worldX / tile))
-	ty := int(math.Floor(worldY / tile))
-	localX := fract(worldX / tile)
-	localY := fract(worldY / tile)
-
-	base := color.RGBA{R: 34, G: 36, B: 52, A: 255}
-	if (tx+ty)&1 == 0 {
-		base = color.RGBA{R: 40, G: 42, B: 60, A: 255}
-	}
-	if localX < 0.02 || localY < 0.02 {
-		base = color.RGBA{R: 20, G: 22, B: 34, A: 255}
-	}
-	noise := valueNoise2D(tx*13+int(localX*27), ty*11+int(localY*21), 42193)
-	fog := clamp(1-(dist/2300), 0.2, 1)
-	mod := (0.85 + 0.24*noise) * fog
-	return color.RGBA{
-		R: uint8(clamp(float64(base.R)*mod, 0, 255)),
-		G: uint8(clamp(float64(base.G)*mod, 0, 255)),
-		B: uint8(clamp(float64(base.B)*mod, 0, 255)),
-		A: 255,
-	}
-}
-
-func sampleEnemyTexel(kind string, health int, hurtTicks int, u float64, v float64) (color.RGBA, bool) {
+func sampleEnemyTexel(kind string, health int, hurtTicks int, u float64, v float64, phase float64, depth float64) (color.RGBA, float64, bool) {
 	cx := (u - 0.5) * 2
-	cy := (v - 0.52) * 2
+	cy := (v - 0.54) * 2
 
-	body := (cx*cx)/(0.85*0.85)+((cy-0.24)*(cy-0.24))/(0.78*0.78) <= 1
-	head := (cx*cx)/(0.42*0.42)+((cy+0.48)*(cy+0.48))/(0.32*0.32) <= 1
-	leftLeg := ((cx+0.26)*(cx+0.26))/(0.22*0.22)+((cy-0.9)*(cy-0.9))/(0.22*0.22) <= 1
-	rightLeg := ((cx-0.26)*(cx-0.26))/(0.22*0.22)+((cy-0.9)*(cy-0.9))/(0.22*0.22) <= 1
-	if !body && !head && !leftLeg && !rightLeg {
-		return color.RGBA{}, false
+	sway := math.Sin(phase) * 0.06
+	armSwing := math.Sin(phase+math.Pi/2) * 0.12
+	legSwing := math.Sin(phase) * 0.16
+
+	torso := ellipseSDF(cx-sway*0.3, cy+0.12, 0.62, 0.72)
+	head := ellipseSDF(cx-sway*0.5, cy+0.74, 0.32, 0.28)
+	leftArm := ellipseSDF(cx+0.52-armSwing*0.2, cy+0.16, 0.17, 0.43)
+	rightArm := ellipseSDF(cx-0.52+armSwing*0.2, cy+0.16, 0.17, 0.43)
+	leftLeg := ellipseSDF(cx+0.2+legSwing*0.2, cy-0.74, 0.19, 0.36)
+	rightLeg := ellipseSDF(cx-0.2-legSwing*0.2, cy-0.74, 0.19, 0.36)
+
+	model := math.Min(math.Min(torso, head), math.Min(math.Min(leftArm, rightArm), math.Min(leftLeg, rightLeg)))
+	if strings.EqualFold(kind, "LOSTSOUL") {
+		model = ellipseSDF(cx, cy+0.28, 0.54, 0.58)
+	}
+	if model > 0 {
+		if strings.EqualFold(kind, "LOSTSOUL") {
+			aura := ellipseSDF(cx, cy+0.25, 0.68, 0.72)
+			if aura <= 0 {
+				a := clamp(-aura*0.3, 0.04, 0.2)
+				return color.RGBA{R: 255, G: 152, B: 76, A: 255}, a, true
+			}
+		}
+		return color.RGBA{}, 0, false
 	}
 
 	base := enemyBaseColor(kind)
-	shade := 0.74 + 0.26*(1-v)
+	if health < 40 {
+		base = color.RGBA{
+			R: clampU8(int(base.R) + 18),
+			G: clampU8(int(base.G) - 12),
+			B: clampU8(int(base.B) - 10),
+			A: 255,
+		}
+	}
 	if hurtTicks > 0 {
-		base = color.RGBA{R: 224, G: 58, B: 58, A: 255}
-		shade = 0.9 + 0.1*(1-v)
-	} else if health < 40 {
-		base = color.RGBA{R: clampU8(int(base.R) + 20), G: clampU8(int(base.G) - 15), B: clampU8(int(base.B) - 15), A: 255}
+		base = color.RGBA{R: 220, G: 62, B: 60, A: 255}
 	}
 
-	r := clamp(float64(base.R)*shade, 0, 255)
-	g := clamp(float64(base.G)*shade, 0, 255)
-	b := clamp(float64(base.B)*shade, 0, 255)
-	col := color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 255}
+	nx := -cx * 0.72
+	ny := (1 - v) * 0.65
+	nz := 1.0
+	nx, ny, nz = normalizeVec3(nx, ny, nz)
+	lx, ly, lz := normalizeVec3(-0.34, -0.22, 0.92)
+	lighting := clamp(nx*lx+ny*ly+nz*lz, 0.26, 1.22)
 
-	// Eyes
-	if math.Abs(cy+0.55) < 0.06 && (math.Abs(cx-0.12) < 0.05 || math.Abs(cx+0.12) < 0.05) {
-		return color.RGBA{R: 255, G: 226, B: 124, A: 255}, true
+	ao := clamp(1+model*0.95, 0.42, 1)
+	depthFade := clamp(1-(depth/2100), 0.48, 1)
+	shade := lighting * ao * depthFade
+
+	col := color.RGBA{
+		R: uint8(clamp(float64(base.R)*shade, 0, 255)),
+		G: uint8(clamp(float64(base.G)*shade, 0, 255)),
+		B: uint8(clamp(float64(base.B)*shade, 0, 255)),
+		A: 255,
 	}
 
-	return col, true
+	// Eyes and mouth details.
+	if head <= 0 {
+		if math.Abs(cy+0.74) < 0.06 && (math.Abs(cx-0.11) < 0.045 || math.Abs(cx+0.11) < 0.045) {
+			return color.RGBA{R: 252, G: 228, B: 126, A: 255}, 1, true
+		}
+		if math.Abs(cy+0.61) < 0.04 && math.Abs(cx) < 0.12 {
+			return color.RGBA{R: 74, G: 24, B: 20, A: 255}, 0.95, true
+		}
+	}
+
+	alpha := clamp(-model*3.2, 0.55, 1)
+	return col, alpha, true
 }
 
 func enemyBaseColor(kind string) color.RGBA {
@@ -831,6 +968,187 @@ func enemyBaseColor(kind string) color.RGBA {
 	default:
 		return color.RGBA{R: 124, G: 92, B: 88, A: 255}
 	}
+}
+
+func sampleSkyTexel(screenX float64, screenY float64, angle float64, tick uint64) color.RGBA {
+	horizon := float64(internalRenderHeight-statusBarHeight) * 0.5
+	t := clamp(screenY/intMaxF(1, horizon), 0, 1)
+
+	skyTop := color.RGBA{R: 20, G: 30, B: 54, A: 255}
+	skyBottom := color.RGBA{R: 90, G: 110, B: 146, A: 255}
+	col := mixColor(skyTop, skyBottom, t*0.9)
+
+	uvx := fract(screenX/float64(internalRenderWidth) + angle/(2*math.Pi) + float64(tick)*0.00006)
+	uvy := screenY / horizon
+	cloudNoise := fbmNoise2D(uvx*190, uvy*145+float64(tick)*0.003, 7391)
+	cloud := clamp((cloudNoise-0.56)*2.2, 0, 1)
+	if cloud > 0 {
+		col = mixColor(col, color.RGBA{R: 196, G: 202, B: 218, A: 255}, cloud*0.45)
+	}
+
+	starNoise := valueNoise2D(int(uvx*640), int(uvy*640), 12211+uint32(tick/8))
+	if t < 0.25 && starNoise > 0.992 {
+		col = mixColor(col, color.RGBA{R: 255, G: 244, B: 196, A: 255}, 0.8)
+	}
+
+	return col
+}
+
+func wallHeightSample(materialClass string, ux float64, vy float64, seed uint32) float64 {
+	x := int(math.Floor(ux))
+	y := int(math.Floor(vy))
+
+	switch materialClass {
+	case "brick":
+		mortar := 0.0
+		if y%12 == 0 {
+			mortar += 0.45
+		}
+		offset := 0
+		if (y/12)%2 == 1 {
+			offset = 8
+		}
+		if (x+offset)%16 == 0 {
+			mortar += 0.45
+		}
+		return clamp(0.6+0.35*valueNoise2D(x*3, y*2, seed)-mortar, 0, 1)
+	case "metal":
+		panel := 0.0
+		if x%16 == 0 || y%16 == 0 {
+			panel += 0.22
+		}
+		rivet := 0.0
+		if (x%16 == 3 || x%16 == 12) && (y%16 == 3 || y%16 == 12) {
+			rivet = 0.35
+		}
+		return clamp(0.5+0.3*valueNoise2D(x, y, seed)-panel+rivet, 0, 1)
+	case "wood":
+		grain := 0.5 + 0.5*math.Sin(ux*0.21+vy*0.03+math.Sin(ux*0.02))
+		return clamp(0.38+0.55*grain+0.2*valueNoise2D(x*2, y, seed), 0, 1)
+	default:
+		crack := 0.0
+		if x%31 == 0 || y%23 == 0 {
+			crack = 0.28
+		}
+		return clamp(0.46+0.44*valueNoise2D(x*2, y*3, seed)-crack, 0, 1)
+	}
+}
+
+func smoothPulse(x float64, a float64, b float64, c float64, d float64) float64 {
+	return smoothstep(a, b, x) - smoothstep(c, d, x)
+}
+
+func smoothstep(edge0 float64, edge1 float64, x float64) float64 {
+	if edge0 == edge1 {
+		if x < edge0 {
+			return 0
+		}
+		return 1
+	}
+	t := clamp((x-edge0)/(edge1-edge0), 0, 1)
+	return t * t * (3 - 2*t)
+}
+
+func mixColor(a color.RGBA, b color.RGBA, amount float64) color.RGBA {
+	amount = clamp(amount, 0, 1)
+	return color.RGBA{
+		R: uint8(clamp(float64(a.R)*(1-amount)+float64(b.R)*amount, 0, 255)),
+		G: uint8(clamp(float64(a.G)*(1-amount)+float64(b.G)*amount, 0, 255)),
+		B: uint8(clamp(float64(a.B)*(1-amount)+float64(b.B)*amount, 0, 255)),
+		A: 255,
+	}
+}
+
+func fbmNoise2D(x float64, y float64, seed uint32) float64 {
+	amp := 0.5
+	freq := 1.0
+	sum := 0.0
+	for i := 0; i < 4; i++ {
+		n := valueNoise2D(int(x*freq), int(y*freq), seed+uint32(i*977))
+		sum += n * amp
+		amp *= 0.5
+		freq *= 2
+	}
+	return clamp(sum/0.9375, 0, 1)
+}
+
+func normalizeVec3(x float64, y float64, z float64) (float64, float64, float64) {
+	length := math.Sqrt(x*x + y*y + z*z)
+	if length < 0.00001 {
+		return 0, 0, 1
+	}
+	return x / length, y / length, z / length
+}
+
+func ellipseSDF(x float64, y float64, rx float64, ry float64) float64 {
+	if rx <= 0 || ry <= 0 {
+		return 1
+	}
+	return math.Sqrt((x*x)/(rx*rx)+(y*y)/(ry*ry)) - 1
+}
+
+func blendPixel(img *ebiten.Image, x int, y int, col color.RGBA, alpha float64) {
+	alpha = clamp(alpha, 0, 1)
+	if alpha <= 0 {
+		return
+	}
+	rv, gv, bv, _ := img.At(x, y).RGBA()
+	base := color.RGBA{
+		R: uint8(rv >> 8),
+		G: uint8(gv >> 8),
+		B: uint8(bv >> 8),
+		A: 255,
+	}
+	img.Set(x, y, mixColor(base, col, alpha))
+}
+
+func drawEllipseFilled(img *ebiten.Image, cx int, cy int, rx int, ry int, col color.RGBA) {
+	if rx <= 0 || ry <= 0 {
+		return
+	}
+	x0 := intMax(0, cx-rx)
+	x1 := intMin(internalRenderWidth-1, cx+rx)
+	y0 := intMax(0, cy-ry)
+	y1 := intMin(internalRenderHeight-1, cy+ry)
+	rrx := float64(rx * rx)
+	rry := float64(ry * ry)
+	for y := y0; y <= y1; y++ {
+		dy := float64(y - cy)
+		for x := x0; x <= x1; x++ {
+			dx := float64(x - cx)
+			d := (dx*dx)/rrx + (dy*dy)/rry
+			if d > 1 {
+				continue
+			}
+			alpha := clamp(1-(d*0.85), 0.4, 1)
+			blendPixel(img, x, y, col, alpha)
+		}
+	}
+}
+
+func fillRectGradient(img *ebiten.Image, x int, y int, w int, h int, top color.RGBA, bottom color.RGBA) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	x0 := intMax(0, x)
+	y0 := intMax(0, y)
+	x1 := intMin(internalRenderWidth, x+w)
+	y1 := intMin(internalRenderHeight, y+h)
+	height := float64(intMax(1, y1-y0))
+	for yy := y0; yy < y1; yy++ {
+		t := float64(yy-y0) / height
+		rowCol := mixColor(top, bottom, t)
+		for xx := x0; xx < x1; xx++ {
+			img.Set(xx, yy, rowCol)
+		}
+	}
+}
+
+func intMaxF(a float64, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func valueNoise2D(x int, y int, seed uint32) float64 {
