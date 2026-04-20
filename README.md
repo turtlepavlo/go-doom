@@ -26,6 +26,7 @@ Layered Doom engine rewrite in Go with strict separation:
 2. `EbitenPoller` collects keyboard state.
 3. `FirstPersonRenderer` renders walls in first-person perspective.
 4. `TopDownRenderer` remains available via `-topdown` for debug.
+5. `LevelSimulation` applies collision against blocking linedefs and spawn orientation.
 
 Run:
 
