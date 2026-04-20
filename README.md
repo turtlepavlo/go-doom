@@ -57,4 +57,5 @@ Controls:
 - `W/S` or `ArrowUp/ArrowDown`: move forward/back
 - `A/D` or `ArrowLeft/ArrowRight`: turn left/right
 - `Q/E`: strafe left/right
+- `Space`, `Ctrl`, or `LMB`: fire
 - `Esc`: quit

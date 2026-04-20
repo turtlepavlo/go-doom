@@ -28,6 +28,9 @@ func NewEbitenPoller() *EbitenPoller {
 			{key: ebiten.KeyEscape, code: "ESC"},
 			{key: ebiten.KeyQ, code: "Q"},
 			{key: ebiten.KeyE, code: "E"},
+			{key: ebiten.KeySpace, code: "FIRE"},
+			{key: ebiten.KeyControlLeft, code: "FIRE"},
+			{key: ebiten.KeyControlRight, code: "FIRE"},
 		},
 	}
 }
@@ -41,6 +44,12 @@ func (p *EbitenPoller) Poll() []dto.RawInput {
 
 		out = append(out, dto.RawInput{
 			Code:    binding.code,
+			Pressed: true,
+		})
+	}
+	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) {
+		out = append(out, dto.RawInput{
+			Code:    "MOUSE1",
 			Pressed: true,
 		})
 	}
