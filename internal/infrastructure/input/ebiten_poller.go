@@ -27,6 +27,7 @@ func NewEbitenPoller() *EbitenPoller {
 			{key: ebiten.KeyArrowRight, code: "ARROWRIGHT"},
 			{key: ebiten.KeyEscape, code: "ESC"},
 			{key: ebiten.KeyQ, code: "Q"},
+			{key: ebiten.KeyE, code: "E"},
 		},
 	}
 }
