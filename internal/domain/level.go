@@ -1,5 +1,7 @@
 package domain
 
+import "math"
+
 type Vertex struct {
 	X int16
 	Y int16
@@ -74,16 +76,49 @@ func NewLevel(
 }
 
 func (l Level) PlayerStart() (x int, y int, ok bool) {
+	spawn, found := l.PlayerSpawn()
+	if !found {
+		return 0, 0, false
+	}
+	return spawn.X, spawn.Y, true
+}
+
+type PlayerSpawn struct {
+	X     int
+	Y     int
+	Angle float64
+}
+
+func (l Level) PlayerSpawn() (spawn PlayerSpawn, ok bool) {
 	for _, thing := range l.Things {
 		if thing.Type >= 1 && thing.Type <= 4 {
-			return int(thing.X), int(thing.Y), true
+			return PlayerSpawn{
+				X:     int(thing.X),
+				Y:     int(thing.Y),
+				Angle: normalizeThingAngle(thing.Angle),
+			}, true
 		}
 	}
 
 	if len(l.Things) == 0 {
-		return 0, 0, false
+		return PlayerSpawn{}, false
 	}
 
 	first := l.Things[0]
-	return int(first.X), int(first.Y), true
+	return PlayerSpawn{
+		X:     int(first.X),
+		Y:     int(first.Y),
+		Angle: normalizeThingAngle(first.Angle),
+	}, true
+}
+
+func normalizeThingAngle(degrees uint16) float64 {
+	angle := float64(degrees) * math.Pi / 180
+	for angle > math.Pi {
+		angle -= 2 * math.Pi
+	}
+	for angle < -math.Pi {
+		angle += 2 * math.Pi
+	}
+	return angle
 }

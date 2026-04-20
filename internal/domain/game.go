@@ -39,11 +39,15 @@ func NewEngine() *Engine {
 }
 
 func NewEngineAt(playerX int, playerY int) *Engine {
+	return NewEnginePose(playerX, playerY, 0)
+}
+
+func NewEnginePose(playerX int, playerY int, angle float64) *Engine {
 	return &Engine{
 		state: GameState{
 			PlayerX: playerX,
 			PlayerY: playerY,
-			Angle:   0,
+			Angle:   normalizeAngle(angle),
 			Running: true,
 		},
 	}
@@ -131,6 +135,15 @@ func (e *Engine) State() GameState {
 
 func (e *Engine) Frame() Frame {
 	return e.snapshot()
+}
+
+func (e *Engine) SetPlayerPosition(playerX int, playerY int) {
+	e.state.PlayerX = playerX
+	e.state.PlayerY = playerY
+}
+
+func (e *Engine) SetAngle(angle float64) {
+	e.state.Angle = normalizeAngle(angle)
 }
 
 func (e *Engine) snapshot() Frame {

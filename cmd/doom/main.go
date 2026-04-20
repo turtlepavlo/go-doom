@@ -174,16 +174,15 @@ func runLoadMap(ctx context.Context, wadPath string, mapName string) (domain.Lev
 }
 
 func runPlayable(level domain.Level, tickRate int, width int, height int, zoom float64, topDownDebug bool) error {
-	startX, startY, ok := level.PlayerStart()
+	spawn, ok := level.PlayerSpawn()
 	if !ok {
-		startX = 0
-		startY = 0
+		spawn = domain.PlayerSpawn{}
 	}
 
-	engine := domain.NewEngineAt(startX, startY)
-	simulation, err := runtimeinfra.NewDomainSimulation(engine)
+	engine := domain.NewEnginePose(spawn.X, spawn.Y, spawn.Angle)
+	simulation, err := runtimeinfra.NewLevelSimulation(engine, &level)
 	if err != nil {
-		return fmt.Errorf("create domain simulation: %w", err)
+		return fmt.Errorf("create level simulation: %w", err)
 	}
 
 	controller, err := playmap.New(
