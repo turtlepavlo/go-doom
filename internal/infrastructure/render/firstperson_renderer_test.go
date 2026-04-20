@@ -29,7 +29,7 @@ func TestFirstPersonRendererLayout(t *testing.T) {
 	}
 }
 
-func TestCollectSolidWalls(t *testing.T) {
+func TestCollectRenderableWalls(t *testing.T) {
 	level, err := domain.NewLevel("E1M1", nil, []domain.Linedef{
 		{StartVertex: 0, EndVertex: 1, RightSide: math.MaxUint16, LeftSide: 0},
 		{StartVertex: 1, EndVertex: 2, RightSide: 1, LeftSide: 2},
@@ -48,8 +48,8 @@ func TestCollectSolidWalls(t *testing.T) {
 		t.Fatalf("new level: %v", err)
 	}
 
-	walls := collectSolidWalls(level)
+	walls := collectRenderableWalls(level)
 	if len(walls) != 1 {
-		t.Fatalf("expected 1 one-sided wall, got %d", len(walls))
+		t.Fatalf("expected 1 renderable wall, got %d", len(walls))
 	}
 }
