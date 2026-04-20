@@ -35,6 +35,8 @@ func (c *InputConverter) ToCommands(raw []dto.RawInput) []domain.Command {
 			commands = append(commands, domain.CommandStrafeLeft)
 		case "E":
 			commands = append(commands, domain.CommandStrafeRight)
+		case "SPACE", "CTRL", "CONTROL", "F", "FIRE", "MOUSE1":
+			commands = append(commands, domain.CommandFire)
 		case "ESC", "ESCAPE":
 			commands = append(commands, domain.CommandQuit)
 		}

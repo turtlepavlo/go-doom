@@ -200,10 +200,10 @@ func runPlayable(level domain.Level, tickRate int, width int, height int, zoom f
 	} else {
 		renderer = renderinfra.NewFirstPersonRenderer(level, width, height, zoom)
 	}
-	game := ebitenplay.New(controller, inputPoller, renderer, engine.Frame())
+	game := ebitenplay.New(controller, inputPoller, renderer, simulation.Frame())
 
 	ebiten.SetWindowSize(width, height)
-	ebiten.SetWindowTitle(fmt.Sprintf("go-doom | %s | W/S move, A/D turn, Q/E strafe, Esc quit", level.Name))
+	ebiten.SetWindowTitle(fmt.Sprintf("go-doom | %s | W/S move, A/D turn, Q/E strafe, Space/LMB fire, Esc quit", level.Name))
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetTPS(tickRate)
 

@@ -11,6 +11,7 @@ const (
 	CommandStrafeRight  Command = "STRAFE_RIGHT"
 	CommandTurnLeft     Command = "TURN_LEFT"
 	CommandTurnRight    Command = "TURN_RIGHT"
+	CommandFire         Command = "FIRE"
 	CommandQuit         Command = "QUIT"
 )
 
@@ -23,11 +24,32 @@ type GameState struct {
 }
 
 type Frame struct {
-	Tick    uint64
-	PlayerX int
-	PlayerY int
-	Angle   float64
-	Running bool
+	Tick             uint64
+	PlayerX          int
+	PlayerY          int
+	Angle            float64
+	Running          bool
+	Health           int
+	Ammo             int
+	EnemyCount       int
+	EnemyAlive       int
+	Kills            int
+	ShotsFired       int
+	ShotHits         int
+	WeaponCooldown   int
+	WeaponFlashTicks int
+	DamageFlashTicks int
+	Enemies          []EnemySnapshot
+}
+
+type EnemySnapshot struct {
+	X         int
+	Y         int
+	TypeID    uint16
+	Kind      string
+	Health    int
+	HurtTicks int
+	Alive     bool
 }
 
 type Engine struct {
@@ -144,6 +166,10 @@ func (e *Engine) SetPlayerPosition(playerX int, playerY int) {
 
 func (e *Engine) SetAngle(angle float64) {
 	e.state.Angle = normalizeAngle(angle)
+}
+
+func (e *Engine) Stop() {
+	e.state.Running = false
 }
 
 func (e *Engine) snapshot() Frame {

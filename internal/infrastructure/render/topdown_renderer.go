@@ -50,6 +50,14 @@ func (r *TopDownRenderer) Draw(screen *ebiten.Image, frame domain.Frame) {
 		vector.StrokeLine(screen, x1, y1, x2, y2, 1, color.RGBA{R: 80, G: 220, B: 150, A: 255}, false)
 	}
 
+	for _, enemy := range frame.Enemies {
+		if !enemy.Alive {
+			continue
+		}
+		ex, ey := r.worldToScreen(float64(enemy.X), float64(enemy.Y), frame)
+		vector.DrawFilledCircle(screen, ex, ey, 3.5, color.RGBA{R: 200, G: 70, B: 56, A: 255}, false)
+	}
+
 	px, py := r.worldToScreen(float64(frame.PlayerX), float64(frame.PlayerY), frame)
 	vector.DrawFilledCircle(screen, px, py, 4, color.RGBA{R: 255, G: 210, B: 70, A: 255}, false)
 	vector.StrokeLine(screen, px-8, py, px+8, py, 1, color.RGBA{R: 255, G: 210, B: 70, A: 255}, false)
