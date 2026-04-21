@@ -1,0 +1,11 @@
+{
+  "iwad_path": "freedoom-0.13.0/freedoom-0.13.0/freedoom1.wad",
+  "map_name": "E1M1",
+  "play_mode": true,
+  "topdown_debug": false,
+  "window_width": 1280,
+  "window_height": 720,
+  "zoom": 1.0,
+  "tick_rate": 35,
+  "runtime_ticks": 0
+}

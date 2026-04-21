@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"errors"
 	"math"
 
@@ -10,6 +11,7 @@ import (
 const (
 	playerCollisionRadius = 18.0
 	minPassageHeight      = 56.0
+	linedefFlagBlocking   = 1 << 0
 
 	playerStartHealth = 100
 	playerStartAmmo   = 60
@@ -24,13 +26,13 @@ var ErrNilLevel = errors.New("nil level")
 
 type enemyProfile struct {
 	kind           string
-	maxHealth      int
+	maxHealth      int64
 	radius         float64
 	speed          float64
 	attackRange    float64
-	attackMinDmg   int
-	attackMaxDmg   int
-	attackCooldown int
+	attackMinDmg   int64
+	attackMaxDmg   int64
+	attackCooldown int64
 }
 
 type enemyState struct {
@@ -39,17 +41,17 @@ type enemyState struct {
 
 	typeID uint16
 	kind   string
-	health int
+	health int64
 	radius float64
 	speed  float64
 
 	attackRange    float64
-	attackMinDmg   int
-	attackMaxDmg   int
-	attackCooldown int
+	attackMinDmg   int64
+	attackMaxDmg   int64
+	attackCooldown int64
 
-	cooldown  int
-	hurtTicks int
+	cooldown  int64
+	hurtTicks int64
 }
 
 type blockingSegment struct {
@@ -60,23 +62,25 @@ type blockingSegment struct {
 }
 
 type LevelSimulation struct {
-	engine   *domain.Engine
+	engine   *Engine
 	segments []blockingSegment
 	enemies  []enemyState
 
-	playerHealth int
-	ammo         int
+	enemySnapshots []domain.EnemySnapshot
 
-	weaponCooldown   int
-	weaponFlashTicks int
-	damageFlashTicks int
+	playerHealth int64
+	ammo         int64
 
-	kills      int
-	shotsFired int
-	shotHits   int
+	weaponCooldown   int64
+	weaponFlashTicks int64
+	damageFlashTicks int64
+
+	kills      int64
+	shotsFired int64
+	shotHits   int64
 }
 
-func NewLevelSimulation(engine *domain.Engine, level *domain.Level) (*LevelSimulation, error) {
+func NewLevelSimulation(engine *Engine, level *domain.Level) (*LevelSimulation, error) {
 	if engine == nil {
 		return nil, ErrNilEngine
 	}
@@ -86,11 +90,12 @@ func NewLevelSimulation(engine *domain.Engine, level *domain.Level) (*LevelSimul
 
 	segments := collectBlockingSegments(*level)
 	return &LevelSimulation{
-		engine:       engine,
-		segments:     segments,
-		enemies:      collectEnemyStates(*level),
-		playerHealth: playerStartHealth,
-		ammo:         playerStartAmmo,
+		engine:         engine,
+		segments:       segments,
+		enemies:        collectEnemyStates(*level),
+		enemySnapshots: make([]domain.EnemySnapshot, 0, len(level.Things)),
+		playerHealth:   playerStartHealth,
+		ammo:           playerStartAmmo,
 	}, nil
 }
 
@@ -98,9 +103,9 @@ func (s *LevelSimulation) Frame() domain.Frame {
 	return s.decorateFrame(s.engine.Frame())
 }
 
-func (s *LevelSimulation) Step(commands []domain.Command) (domain.Frame, error) {
+func (s *LevelSimulation) Step(ctx context.Context, commands []domain.Command) (domain.Frame, error) {
 	prev := s.engine.State()
-	frame := s.engine.Step(commands)
+	frame := s.engine.Step(ctx, commands)
 	if !frame.Running {
 		return s.decorateFrame(frame), nil
 	}
@@ -113,9 +118,9 @@ func (s *LevelSimulation) Step(commands []domain.Command) (domain.Frame, error) 
 
 		switch {
 		case !s.collides(nextX, prevY):
-			s.engine.SetPlayerPosition(int(math.Round(nextX)), int(math.Round(prevY)))
+			s.engine.SetPlayerPosition(int64(math.Round(nextX)), int64(math.Round(prevY)))
 		case !s.collides(prevX, nextY):
-			s.engine.SetPlayerPosition(int(math.Round(prevX)), int(math.Round(nextY)))
+			s.engine.SetPlayerPosition(int64(math.Round(prevX)), int64(math.Round(nextY)))
 		default:
 			s.engine.SetPlayerPosition(prev.PlayerX, prev.PlayerY)
 		}
@@ -138,26 +143,26 @@ func (s *LevelSimulation) Step(commands []domain.Command) (domain.Frame, error) 
 }
 
 func (s *LevelSimulation) decorateFrame(frame domain.Frame) domain.Frame {
-	alive := 0
-	enemySnapshots := make([]domain.EnemySnapshot, 0, len(s.enemies))
+	var alive int64
+	s.enemySnapshots = s.enemySnapshots[:0]
 	for _, enemy := range s.enemies {
 		if enemy.health > 0 {
 			alive++
 		}
-		enemySnapshots = append(enemySnapshots, domain.EnemySnapshot{
-			X:         int(math.Round(enemy.x)),
-			Y:         int(math.Round(enemy.y)),
+		s.enemySnapshots = append(s.enemySnapshots, domain.EnemySnapshot{
+			X:         int64(math.Round(enemy.x)),
+			Y:         int64(math.Round(enemy.y)),
 			TypeID:    enemy.typeID,
 			Kind:      enemy.kind,
-			Health:    maxInt(enemy.health, 0),
+			Health:    maxInt64(enemy.health, 0),
 			HurtTicks: enemy.hurtTicks,
 			Alive:     enemy.health > 0,
 		})
 	}
 
-	frame.Health = maxInt(s.playerHealth, 0)
-	frame.Ammo = maxInt(s.ammo, 0)
-	frame.EnemyCount = len(s.enemies)
+	frame.Health = maxInt64(s.playerHealth, 0)
+	frame.Ammo = maxInt64(s.ammo, 0)
+	frame.EnemyCount = int64(len(s.enemies))
 	frame.EnemyAlive = alive
 	frame.Kills = s.kills
 	frame.ShotsFired = s.shotsFired
@@ -165,7 +170,7 @@ func (s *LevelSimulation) decorateFrame(frame domain.Frame) domain.Frame {
 	frame.WeaponCooldown = s.weaponCooldown
 	frame.WeaponFlashTicks = s.weaponFlashTicks
 	frame.DamageFlashTicks = s.damageFlashTicks
-	frame.Enemies = enemySnapshots
+	frame.Enemies = s.enemySnapshots
 	return frame
 }
 
@@ -277,7 +282,7 @@ func (s *LevelSimulation) stepEnemies(frame domain.Frame) {
 		if hasLOS && dist <= enemy.attackRange && enemy.cooldown == 0 {
 			damage := enemyAttackDamage(*enemy, frame.Tick+uint64(i*13))
 			s.playerHealth -= damage
-			s.damageFlashTicks = maxInt(s.damageFlashTicks, damageFlashTicksOnHit)
+			s.damageFlashTicks = maxInt64(s.damageFlashTicks, damageFlashTicksOnHit)
 			enemy.cooldown = enemy.attackCooldown
 			continue
 		}
@@ -362,7 +367,7 @@ func collectBlockingSegments(level domain.Level) []blockingSegment {
 	for _, line := range level.Linedefs {
 		aIdx := int(line.StartVertex)
 		bIdx := int(line.EndVertex)
-		if aIdx < 0 || bIdx < 0 || aIdx >= len(level.Vertexes) || bIdx >= len(level.Vertexes) {
+		if aIdx >= len(level.Vertexes) || bIdx >= len(level.Vertexes) {
 			continue
 		}
 
@@ -481,23 +486,24 @@ func hasCommand(commands []domain.Command, expected domain.Command) bool {
 }
 
 func isBlockingLine(level domain.Level, line domain.Linedef) bool {
+	if (line.Flags & linedefFlagBlocking) != 0 {
+		return true
+	}
+
 	const noSide = math.MaxUint16
 
 	rightIdx := int(line.RightSide)
 	leftIdx := int(line.LeftSide)
-	if line.RightSide == noSide || rightIdx < 0 || rightIdx >= len(level.Sidedefs) {
+	if line.RightSide == noSide || rightIdx >= len(level.Sidedefs) {
 		return true
 	}
-	if line.LeftSide == noSide || leftIdx < 0 || leftIdx >= len(level.Sidedefs) {
+	if line.LeftSide == noSide || leftIdx >= len(level.Sidedefs) {
 		return true
 	}
 
 	rightSectorIdx := int(level.Sidedefs[rightIdx].Sector)
 	leftSectorIdx := int(level.Sidedefs[leftIdx].Sector)
-	if rightSectorIdx < 0 || rightSectorIdx >= len(level.Sectors) {
-		return true
-	}
-	if leftSectorIdx < 0 || leftSectorIdx >= len(level.Sectors) {
+	if rightSectorIdx >= len(level.Sectors) || leftSectorIdx >= len(level.Sectors) {
 		return true
 	}
 
@@ -555,16 +561,16 @@ func segmentIntersection(ax float64, ay float64, bx float64, by float64, cx floa
 	return t >= 0 && t <= 1 && u >= 0 && u <= 1, t
 }
 
-func enemyAttackDamage(enemy enemyState, tick uint64) int {
+func enemyAttackDamage(enemy enemyState, tick uint64) int64 {
 	if enemy.attackMaxDmg <= enemy.attackMinDmg {
 		return enemy.attackMinDmg
 	}
 	rangeSize := enemy.attackMaxDmg - enemy.attackMinDmg + 1
-	return enemy.attackMinDmg + int((tick+uint64(enemy.typeID))%uint64(rangeSize))
+	return enemy.attackMinDmg + int64((tick+uint64(enemy.typeID))%uint64(rangeSize))
 }
 
-func shotgunLikeDamage(tick uint64, distance float64) int {
-	base := 24 + int((tick*7)%26)
+func shotgunLikeDamage(tick uint64, distance float64) int64 {
+	base := int64(24 + int((tick*7)%26))
 	if distance < 200 {
 		base += 22
 	} else if distance < 420 {
@@ -572,7 +578,7 @@ func shotgunLikeDamage(tick uint64, distance float64) int {
 	} else if distance > 900 {
 		base -= 10
 	}
-	return maxInt(base, 8)
+	return maxInt64(base, 8)
 }
 
 func normalizeAngle(angle float64) float64 {
@@ -586,7 +592,7 @@ func normalizeAngle(angle float64) float64 {
 	return angle
 }
 
-func maxInt(a int, b int) int {
+func maxInt64(a int64, b int64) int64 {
 	if a > b {
 		return a
 	}

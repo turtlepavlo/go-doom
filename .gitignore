@@ -1,3 +1,60 @@
 *.wad
+*.WAD
 *.zip
+*.7z
 freedoom-*/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.iml
+.fleet/
+.history/
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.rej
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Build artifacts
+bin/
+build/
+dist/
+out/
+__debug_bin
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+
+# Go test and coverage artifacts
+*.test
+*.out
+*.prof
+*.pprof
+.gocache/
+.gomodcache/
+coverage.out
+coverage.txt
+*.coverprofile
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+*.tmp
+.cache/
+
+# Environment files
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/

@@ -1,0 +1,11 @@
+{
+  "iwad_path": "",
+  "map_name": "",
+  "play_mode": false,
+  "topdown_debug": false,
+  "window_width": 1280,
+  "window_height": 720,
+  "zoom": 1.0,
+  "tick_rate": 35,
+  "runtime_ticks": 0
+}
